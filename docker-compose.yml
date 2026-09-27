@@ -1,0 +1,30 @@
+services:
+  qb-stream:
+    # 方式一（推荐，免在 NAS 上装 Go）：先在有 Docker 的机器上构建并导出镜像，
+    #   docker build -t qb-stream:latest .
+    #   docker save qb-stream:latest -o qb-stream-image.tar
+    # 把 qb-stream-image.tar 传到 NAS 后「本地镜像导入」，即可直接使用本文件启动。
+    #
+    # 方式二：NAS 能联网拉取 golang 镜像时，可改用从源码构建：
+    #   build: .
+    image: qb-stream:latest
+    container_name: qb-stream
+    restart: unless-stopped
+    # host 网络：与 qBittorrent 在同一台 NAS 上时推荐，
+    # 直接用 127.0.0.1 访问 qB WebUI，避免 bridge 网络访问宿主机被拦的问题。
+    # 若 qB 在别的机器上，可删掉本行改用 ports 映射，QBSTREAM_QB_URL 填那台机器的 IP。
+    network_mode: host
+    environment:
+      # ↓ 以下环境变量仅在首次启动（配置文件不存在）时引导生成配置，
+      #   之后配置持久化在 ./config/qb-stream.json，改动请走网页「设置」页
+      - QBSTREAM_QB_URL=http://127.0.0.1:8080 # qBittorrent WebUI 地址（host 网络下用本机回环；端口按你的 qB 实际端口改）
+      - QBSTREAM_QB_USER=admin                # qBittorrent 登录用户名
+      - QBSTREAM_QB_PASS=改成你的qB密码         # ← 首次启动前必须改成你自己的 qB 密码
+      - QBSTREAM_PORT=8888                    # 浏览器访问端口（被占用就换一个）
+      # 路径映射全自动：自动探测 qB 默认下载目录 → 容器内 /media，无需配置
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./config:/config # 配置持久化（含 qB 密码，0600 权限，注意备份与保密）
+      # 冒号左边改成 qB 下载目录在 NAS 宿主机上的真实路径（与 qBittorrent 容器
+      # 下载目录指向的宿主机路径是同一个）；容器内固定挂载为 /media，只读播放
+      - /path/to/your/downloads:/media:ro

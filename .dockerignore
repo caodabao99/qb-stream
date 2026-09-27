@@ -1,0 +1,9 @@
+# 构建上下文只保留源码，排除本地产物与含密码的配置
+qb-stream
+qb-stream.json
+config/
+auto-prio.sh
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore

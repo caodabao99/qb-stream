@@ -1,0 +1,18 @@
+# 编译产物
+/qb-stream
+*.exe
+
+# Docker 导出的镜像包（约 7MB，不应入库）
+qb-stream-image.tar
+*.tar
+
+# 运行配置（含 qBittorrent 密码，严禁提交）
+qb-stream.json
+/config/
+
+# 已被程序内置自动优先级功能取代的旧脚本
+/auto-prio.sh
+
+# 日志与临时文件
+*.log
+*.tmp

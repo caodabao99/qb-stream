@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4f46e5">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%234f46e5'/%3E%3Cpath d='M10 9l12 7-12 7z' fill='%23fff'/%3E%3C/svg%3E">
+<title>qb-stream</title>
+<link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+<div id="app" v-cloak>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/">
+        <span class="logo">▶</span>
+        <span>qb-stream</span>
+      </a>
+      <nav class="tabs">
+        <a href="#/" :class="{active: route.view==='torrents'}">种子</a>
+        <a href="#/settings" :class="{active: route.view==='settings'}">设置</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ============ 种子列表 ============ -->
+    <section v-if="route.view==='torrents'">
+      <div class="card add-card">
+        <h2>添加种子</h2>
+        <form class="add-form" @submit.prevent="addTorrent">
+          <label class="file-btn">
+            <input type="file" accept=".torrent" @change="pickFile">
+            {{ addFile ? addFile.name : '选择 .torrent 文件' }}
+          </label>
+          <input class="text-input grow" type="text" v-model="addMagnet" placeholder="或粘贴磁力链接 magnet:?xt=urn:btih:...">
+          <button class="btn primary" type="submit" :disabled="adding">{{ adding ? '添加中…' : '添加' }}</button>
+        </form>
+        <p class="hint">默认顺序下载 + 优先头尾 + 立即开始；添加后点「复制列表」到播放器选集播放</p>
+      </div>
+
+      <div class="list-head">
+        <h2>种子列表 <span class="count" v-if="torrents.length">{{ torrents.length }}</span></h2>
+        <button class="btn ghost sm" @click="loadTorrents" :disabled="loadingTorrents">刷新</button>
+      </div>
+
+      <p class="empty" v-if="!loadingTorrents && !torrents.length">还没有种子，先添加一个吧</p>
+
+      <div class="torrent-card" v-for="t in torrents" :key="t.hash">
+        <div class="t-main" @click="gotoFiles(t.hash)">
+          <div class="t-name">{{ t.name }}</div>
+          <div class="t-progress">
+            <div class="bar"><div class="fill" :class="barClass(t)" :style="{width: (t.progress*100)+'%'}"></div></div>
+            <span class="pct">{{ (t.progress*100).toFixed(1) }}%</span>
+          </div>
+          <div class="t-meta">
+            <span class="chip" :class="chipClass(t.state)">{{ t.state_text }}</span>
+            <span>{{ fmtSize(t.size) }}</span>
+          </div>
+          <div class="t-stats">
+            <div class="stat">
+              <span class="s-label">下载速度</span>
+              <span class="s-val dl">↓ {{ t.dlspeed > 0 ? fmtSize(t.dlspeed)+'/s' : '—' }}</span>
+            </div>
+            <div class="stat">
+              <span class="s-label">上传速度</span>
+              <span class="s-val ul">↑ {{ t.upspeed > 0 ? fmtSize(t.upspeed)+'/s' : '—' }}</span>
+            </div>
+            <div class="stat">
+              <span class="s-label">剩余时间</span>
+              <span class="s-val">{{ fmtETA(t.eta) }}</span>
+            </div>
+            <div class="stat">
+              <span class="s-label">比率</span>
+              <span class="s-val">{{ fmtRatio(t.ratio) }}</span>
+            </div>
+            <div class="stat">
+              <span class="s-label">做种人数</span>
+              <span class="s-val">{{ peerText(t.num_seeds, t.num_complete) }}</span>
+            </div>
+            <div class="stat">
+              <span class="s-label">下载人数</span>
+              <span class="s-val">{{ peerText(t.num_leechs, t.num_incomplete) }}</span>
+            </div>
+          </div>
+          <div class="t-times">
+            <span>添加：{{ fmtTime(t.added_on) }}</span>
+            <span>完成：{{ fmtTime(t.completion_on, '未完成') }}</span>
+          </div>
+          <div class="t-tracker" v-if="t.tracker" :title="t.tracker">
+            <span class="tk-label">Tracker</span>{{ shortTracker(t.tracker) }}
+          </div>
+        </div>
+        <div class="t-actions">
+          <button class="btn sm" @click="copyPlaylist(t)">复制列表</button>
+          <button class="btn sm" @click="gotoFiles(t.hash)">文件</button>
+          <button class="btn sm" v-if="isPaused(t)" @click="doAction(t,'start')">开始</button>
+          <button class="btn sm" v-else @click="doAction(t,'stop')">暂停</button>
+          <button class="btn sm" @click="doAction(t,'delete')">删除</button>
+          <button class="btn sm danger" @click="doAction(t,'deletefiles')">删除+文件</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 文件列表 ============ -->
+    <section v-if="route.view==='files'">
+      <div class="card files-head">
+        <div class="fh-top">
+          <a class="back" href="#/">← 返回种子列表</a>
+          <button class="btn ghost sm" @click="loadFiles" :disabled="loadingFiles">{{ loadingFiles ? '刷新中…' : '刷新' }}</button>
+        </div>
+        <div class="fh-row">
+          <h2 class="fh-name">{{ torrentName || '文件列表' }}</h2>
+          <button class="btn primary" @click="copyPlaylist(route.hash)">复制剧集列表（M3U）</button>
+        </div>
+        <p class="hint">把列表地址粘到 VLC / SenPlayer，可在播放器里选集、播完自动下一集</p>
+      </div>
+
+      <div class="file-row" v-for="f in files" :key="f.index">
+        <div class="f-main">
+          <div class="f-name">
+            <span class="f-idx">{{ f.index }}</span>
+            {{ shortName(f.name) }}
+          </div>
+          <div class="f-meta">
+            <span class="prio-wrap"><span class="muted-label">优先级</span><span class="chip prio">{{ f.priority_text }}</span></span>
+            <span>{{ fmtSize(f.size) }}</span>
+            <span v-if="f.progress < 1">{{ (f.progress*100).toFixed(0) }}%</span>
+            <span v-else class="done">已完成</span>
+          </div>
+        </div>
+        <div class="f-actions" v-if="f.is_video">
+          <button class="btn sm primary" @click="copyStream(f)">复制播放地址</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 设置 ============ -->
+    <section v-if="route.view==='settings' && settings">
+      <form @submit.prevent="saveSettings">
+
+        <div class="card set-card">
+          <h2>qBittorrent 连接</h2>
+          <div class="field">
+            <label>WebUI 地址</label>
+            <input class="text-input grow" type="text" v-model="settings.qb_url">
+            <p class="hint">qB 的网页地址，如 http://192.168.1.10:8080；qb-stream 与 qB 同机（host 网络）时填 http://127.0.0.1:端口。保存时会先试登录，失败则不保存</p>
+          </div>
+          <div class="field">
+            <label>用户名</label>
+            <input class="text-input" type="text" v-model="settings.qb_user">
+            <p class="hint">qBittorrent 的登录用户名（qB 网页用的那个）</p>
+          </div>
+          <div class="field">
+            <label>密码</label>
+            <input class="text-input" type="password" v-model="settings.qb_pass" :placeholder="hasPass ? '已设置，留空保持不变' : '未设置'">
+            <p class="hint">qBittorrent 的登录密码，留空表示不修改</p>
+          </div>
+        </div>
+
+        <div class="card set-card">
+          <h2>监听 <span class="tag">修改后需重启</span></h2>
+          <div class="field">
+            <label>监听地址</label>
+            <input class="text-input" type="text" v-model="settings.host">
+            <p class="hint">0.0.0.0 = 局域网内所有设备可访问（NAS 部署用这个）；127.0.0.1 = 仅本机可访问</p>
+          </div>
+          <div class="field">
+            <label>监听端口</label>
+            <input class="text-input" type="number" v-model.number="settings.port">
+            <p class="hint">浏览器访问的端口，如 http://NAS_IP:8888。修改后需重启容器才生效</p>
+          </div>
+        </div>
+
+        <div class="card set-card">
+          <h2>流参数 <span class="tag">一般保持默认</span></h2>
+          <div class="field">
+            <label>轮询间隔</label>
+            <input class="text-input" type="text" v-model="settings.poll">
+            <p class="hint">播放中检查「数据是否已下载」的频率，默认 1s。调小反应更快但更占 qB 资源，最低 500ms</p>
+          </div>
+          <div class="field">
+            <label>等待超时</label>
+            <input class="text-input" type="text" v-model="settings.max_wait">
+            <p class="hint">播放到未下载区域时最多等多久，默认 120s（如 2m、120s）。下载速度慢时调大，调太小容易报「数据尚未就绪」</p>
+          </div>
+          <div class="field">
+            <label>传输块大小</label>
+            <input class="text-input" type="number" v-model.number="settings.chunk">
+            <p class="hint">每次发给播放器的数据块字节数，默认 65536（64KB）。一般无需修改</p>
+          </div>
+        </div>
+
+        <div class="card set-card">
+          <h2>自动优先级 <span class="tag">顺序下载追剧</span></h2>
+          <p class="hint block">严格按集数顺序下载：第一集优先，播完后自动把下一集提为「高」优先级，逐集推进，不会跳集。</p>
+          <div class="field">
+            <label>领先集数</label>
+            <input class="text-input" type="number" v-model.number="settings.prio_lead">
+            <p class="hint">想一口气连着看 N 集就填 N，默认 1 = 只保证下一集优先下载</p>
+          </div>
+          <div class="field">
+            <label>检查间隔</label>
+            <input class="text-input" type="text" v-model="settings.prio_interval">
+            <p class="hint">每隔多久检查进度并调整优先级，默认 30s。无需改小，检查很轻量</p>
+          </div>
+        </div>
+
+        <div class="save-row">
+          <button class="btn primary lg" type="submit" :disabled="saving">{{ saving ? '保存中…' : '保存设置' }}</button>
+          <p class="hint">除监听地址/端口需重启外，其余保存后即时生效</p>
+        </div>
+      </form>
+    </section>
+
+  </main>
+
+  <div class="toasts">
+    <transition-group name="toast">
+      <div v-for="t in toasts" :key="t.id" class="toast" :class="t.type">{{ t.msg }}</div>
+    </transition-group>
+  </div>
+
+</div>
+<script src="/assets/vue.global.prod.js"></script>
+<script src="/assets/app.js"></script>
+</body>
+</html>
